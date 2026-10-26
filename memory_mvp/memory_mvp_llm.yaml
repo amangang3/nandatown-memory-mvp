@@ -1,0 +1,18 @@
+name: memory_mvp_llm
+description: Two model-driven agents meet; each decides for itself what to remember in its own memory.md, and in round two the buyer orders from memory instead of asking the price again.
+seed: 42
+layers:
+  memory: markdown.v1
+plugin_files:
+  - memory_markdown.py
+  - llm_agents.py
+validator: memory_mvp_llm
+agents:
+  - name: agent-a
+    role: llm-asker
+    config: {sku: widget, quantity: 2, rounds: 2}
+  - name: agent-b
+    role: llm-answerer
+    config: {sku: widget, unit_cents: 1995}
+faults: []
+max_time: 120

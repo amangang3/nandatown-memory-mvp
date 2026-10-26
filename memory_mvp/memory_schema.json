@@ -1,0 +1,50 @@
+{
+  "_comment": "The write boundary. A memory layer that accepts anything is a notepad, not a store: declare what each key may hold and reject the rest, with the reason handed back to the writer. Exact keys win; patterns catch the names a writer invents; the default catches everything else.",
+  "default": {
+    "type": "string",
+    "max_length": 200
+  },
+  "keys": {
+    "widget_unit_cents": {
+      "type": "integer",
+      "min": 0
+    },
+    "last_order_total_cents": {
+      "type": "integer",
+      "min": 0
+    },
+    "questions_answered": {
+      "type": "integer",
+      "min": 0
+    },
+    "orders_filled": {
+      "type": "integer",
+      "min": 0
+    },
+    "preferred_seller": {
+      "type": "agent"
+    },
+    "last_buyer": {
+      "type": "agent"
+    },
+    "last_question_from": {
+      "type": "agent"
+    }
+  },
+  "patterns": {
+    "*_cents": {
+      "type": "integer",
+      "min": 0
+    },
+    "*_seller": {
+      "type": "agent"
+    },
+    "*_buyer": {
+      "type": "agent"
+    },
+    "*_count": {
+      "type": "integer",
+      "min": 0
+    }
+  }
+}

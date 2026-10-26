@@ -1,0 +1,17 @@
+name: memory_mvp
+description: Two agents meet, one asks a price and both write what they learned to their own memory.md; in round two the asker recalls from its file instead of asking again.
+seed: 42
+layers:
+  memory: markdown.v1
+plugin_files:
+  - memory_markdown.py
+validator: memory_mvp
+agents:
+  - name: agent-a
+    role: asker
+    config: {sku: widget, quantity: 2, rounds: 2}
+  - name: agent-b
+    role: answerer
+    config: {sku: widget, unit_cents: 1995}
+faults: []
+max_time: 60
