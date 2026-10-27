@@ -3,35 +3,45 @@
 An MVP of a git-like memory layer for AI agents, built as a plugin for
 [NANDA Town](https://github.com/projnanda/nandatown).
 
-Two Claude agents trade with each other. Each keeps its memory in a plain
-markdown file it reads and writes itself. The file **is** the store, not a log
-of it — edit a line by hand and the agent believes you.
+Two agents trade with each other. Each keeps its memory in plain files it
+reads and writes itself — and an outside observer reads the same conversation
+and keeps its own record of what actually happened. The files **are** the
+store, not a log of them: edit a line by hand and the agent believes you, but
+the store knows it was edited and the observer disagrees from the trace alone.
 
 **▶ [Watch the interactive demo](https://amangang3.github.io/nandatown-memory-mvp/)**
-— press play, watch both memory files read, write and refuse in step, then see
-what happens when one line of one agent's memory is altered.
+— press play and watch four recorded runs, with both memory lanes per agent
+and live panels for the write rules, the commit history, the access decisions
+and where the two records disagreed.
 
-Every step in the demo is replayed from a recorded run. Nothing is mocked.
+## The four runs in the demo
 
-## The three runs
-
-| Run | What was edited | What happened |
+| Run | What's different | What happens |
 |---|---|---|
-| Normal | nothing | Sale completed, both sides agree, two messages |
-| Buyer's memory altered | the price it thinks a widget costs ($19.95 → $9.99) | Buyer believed it. The marketplace blocked the sale — the memory layer never noticed |
-| Seller's memory altered | its customer note, replaced with an accusation | Buyer's price was correct and it was refused anyway, twice, on a history that never happened |
+| A normal trade | nothing | Round two costs two messages instead of four; both records agree |
+| The price changed | the seller raised its price | The buyer's memory goes stale and it never repairs itself — the observer repairs the record, citing the refusal that proved it |
+| Someone edited a memory | one line changed in a text editor | Caught twice over: the store reports the file as edited outside it, and the observer independently contradicts that key |
+| Cross-enterprise | policy says observation only | Every attempt an agent makes to record anything is refused with its reason — and a usable record is produced anyway |
 
-The contrast is the finding: **a corrupted price is caught, because a price is
-checkable. A corrupted reputation is caught by nothing.**
+The earlier, simpler demo is still here:
+**[One Edited Line](https://amangang3.github.io/nandatown-memory-mvp/one-edited-line.html)**
+— one memory file per agent, three runs, and what a single edited line does to
+a trade. Its finding still frames the whole project: *a corrupted price is
+caught, because a price is checkable; a corrupted reputation is caught by
+nothing.*
+
+Every step in both demos is replayed from a recorded evidence bundle. Nothing
+is mocked.
 
 [LEARNINGS.md](LEARNINGS.md) has the full write-up — measurements, takeaways,
 the tamper experiment, and what a genuinely git-like memory layer would still
 need.
 
-## The combined layer
+## The two layers
 
-The demo above is the single-lane MVP (`markdown.v1`). The repo also carries
-`git.v1`, which closes most of that gap list by combining this work with
+`markdown.v1` is the first MVP: one markdown file per agent, written only by
+that agent. `git.v1` is the full thing, and what the demo above runs — it
+closes most of the gap list in LEARNINGS.md by combining this work with
 [git-for-memory](https://github.com/akg745/git-for-memory):
 
 | Capability | What it does |
@@ -57,7 +67,8 @@ memory file by hand. Nine acts, about ten minutes, no model account needed.
 
 | Path | What it is |
 |---|---|
-| `index.html` | the demo site (self-contained, no build step) |
+| `index.html` | the demo: four runs of the full `git.v1` layer |
+| `one-edited-line.html` | the first demo: one file per agent, one edited line |
 | `LEARNINGS.md` | the written report |
 | `memory_mvp/DEMO.md` | **the demo walkthrough** |
 | `memory_mvp/COMBINED.md` | reference for the combined `git.v1` layer |
