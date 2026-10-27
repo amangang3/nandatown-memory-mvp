@@ -1,0 +1,10 @@
+{
+  "_comment": "Capability 4. `preset` picks the baseline; `overrides` changes individual toggles on top of it. A toggle not listed in overrides always follows the preset, so switching preset really switches behaviour. Override the preset for one run with TOWN_MEMORY_PRESET=cross_enterprise.",
+  "_presets": {
+    "open_lab": "everything readable; for debugging a scenario",
+    "default": "agents' memory is private; harness and observer may read it; a subject cannot see claims made about it",
+    "cross_enterprise": "we do not define how the other side records memory and cannot read inside it; the observed lane is the only capture"
+  },
+  "preset": "default",
+  "overrides": {}
+}

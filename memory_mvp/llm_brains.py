@@ -110,6 +110,13 @@ class MockBrain(Brain):
                 return call("quote_price", buyer=buyer, sku=sku)
             return done("Quoted my price.")
         if "an order arrived" in said:
+            # Check what we already know about this counterparty, when the
+            # town offers a way to ask. Whether the answer comes back is a
+            # policy decision, not ours.
+            offered = {t.get("name") for t in tools}
+            if ("read_counterparty_memory" in offered
+                    and "read_counterparty_memory" not in seen):
+                return call("read_counterparty_memory", agent=buyer)
             if "remember" not in seen:
                 return call("remember", key="last_buyer", value=buyer)
             if "confirm_order" not in seen:

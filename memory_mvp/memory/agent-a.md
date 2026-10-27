@@ -1,6 +1,6 @@
 # memory: agent-a
 
-- run `sim-6ea9bb54a07a` · scenario `memory_mvp`
+- run `sim-7293bd016a69` · scenario `memory_mvp`
 - store: `markdown.v1` — this file *is* the memory; editing it changes what the agent knows
 - run finished at t=1.90
 

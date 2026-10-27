@@ -1,0 +1,17 @@
+name: memory_combined_price_change
+description: "The seller has put its price up since the last run. The buyer still believes the old one, orders at it, and is refused — and the observer repairs the record from the refusal itself."
+seed: 42
+layers:
+  memory: git.v1
+plugin_files:
+  - memory_combined.py
+validator: memory_combined
+agents:
+  - name: agent-a
+    role: git-asker
+    config: {sku: widget, quantity: 2, rounds: 2}
+  - name: agent-b
+    role: git-answerer
+    config: {sku: widget, unit_cents: 2195}
+faults: []
+max_time: 60

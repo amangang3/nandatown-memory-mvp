@@ -155,6 +155,31 @@ written. Without it a model invents a key name on the way in and a
 different one on the way out, and pays again for a fact it already
 owns — see `no_key_drift`.
 
+## The combined layer: `git.v1`
+
+`markdown.v1` above is the single-lane MVP. `git.v1` is the full thing —
+two capture lanes, one write contract, a git-versioned store adapted from
+[git-for-memory](https://github.com/akg745/git-for-memory), and an access
+policy on every read.
+
+```bash
+nandatown run memory_mvp/memory_combined.yaml              # scripted, ~1s
+nandatown run memory_mvp/memory_combined_llm.yaml          # model-driven
+TOWN_MEMORY_PRESET=cross_enterprise \
+  nandatown run memory_mvp/memory_combined.yaml            # observation only
+cd memory_mvp && python3 -m gitmem.inspect history agent-a widget_unit_cents
+```
+
+| Capability | Where it lives |
+|---|---|
+| Capture, two lanes | `gitmem/layer.py` (self), `gitmem/observer.py` (observed) |
+| Writing rules | `gitmem/contract.py` + `memory_schema.json` |
+| Version tracking | `gitmem/store.py` + `gitmem/inspect.py` |
+| Access control | `gitmem/policy.py` + `memory_policy.json` |
+
+See **[COMBINED.md](COMBINED.md)** for the full picture: the presets, the
+observer backends, the event vocabulary, the stages and the limits.
+
 ## Where to take it next
 
 - More agents: add rows under `agents:`; each gets its own file.
