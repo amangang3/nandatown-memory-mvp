@@ -424,6 +424,42 @@ we do not get to write inside the other side's agent.
 
 ---
 
+## Act 7c — Someone edits a memory *and commits it*
+
+Act 7's edit was caught because git saw a change nobody had committed. Edit
+the corrected price again, and this time commit it like anyone with a
+shell could:
+
+```bash
+sed -i '' 's/^2195$/1995/' memory-git/facts/agent-a/self/f-0015.md
+git -C memory-git commit -qam "fix price"
+python3 -m gitmem.inspect check             # clean: the tree matches HEAD
+```
+
+Nothing is flagged: the edit is now part of the history. Signed commits
+close that. Turn them on and give the corrector a key:
+
+```bash
+echo '{"preset": "default", "overrides": {"signed_commits": "require"}}' > /tmp/signed.json
+export TOWN_MEMORY_POLICY=/tmp/signed.json
+python3 -m gitmem.inspect keygen human:your-name
+python3 -m gitmem.inspect verify
+```
+
+On a store that already has unsigned history, the first signed run adds a
+"signing turned on" commit, and everything before it is listed as legacy.
+From then on, repeat the edit and the commit, and `verify` names it:
+
+```
+!! ddbda8f unsigned      -              fix price
+```
+
+The next run fails `commits_signed`. With `outside_edits: restore` added
+to the policy, the run undoes it instead (`untrusted_commits_undone`), and
+the buyer orders at the corrected price again. A correction signed by
+anyone but the person it names is refused, and so is a correction made
+while an untrusted commit is pending.
+
 ## Act 8 — Access control
 
 Who may read what, as toggles.

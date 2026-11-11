@@ -94,9 +94,12 @@ class Change:
 class Store:
     """A git repository of facts. Nothing is ever deleted."""
 
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, signer=None):
         self.root = Path(root).expanduser()
         self.facts_dir = self.root / "facts"
+        # A gitmem.signing.Signer, or None for unsigned commits. With one,
+        # every commit this store makes carries its SSH signature.
+        self.signer = signer
 
     # -- setup -----------------------------------------------------------
 
@@ -124,8 +127,10 @@ class Store:
                                f"{out.stderr.strip()}")
         return out.stdout
 
-    def _commit(self, message: str, when: str) -> str:
-        self._git("commit", "-q", "-m", message, when=when)
+    def _commit(self, message: str, when: str, signer=None) -> str:
+        signer = signer or self.signer
+        flags = signer.git_flags() if signer is not None else []
+        self._git(*flags, "commit", "-q", "-m", message, when=when)
         return self._git("rev-parse", "--short", "HEAD").strip()
 
     # -- reading ----------------------------------------------------------
@@ -275,7 +280,7 @@ class Store:
         return changes
 
     def commit(self, changes: list[Change], source: str, title: str,
-               when: str) -> str | None:
+               when: str, signer=None) -> str | None:
         changes = [c for c in changes if c.op != "NOOP"]
         if not changes:
             return None
@@ -315,7 +320,7 @@ class Store:
                 if path not in paths:
                     paths.append(path)
         self._git("add", "--", *paths)
-        return self._commit(message, when=when)
+        return self._commit(message, when=when, signer=signer)
 
 
 def _slug(name: str) -> str:

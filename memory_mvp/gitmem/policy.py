@@ -14,6 +14,9 @@ toggles exist because the right answer changes with the deployment:
 Two toggles cover changes to memory that do not come from the agent:
 `human_corrections` (may a named person correct a fact through the store)
 and `outside_edits` (report a file edited around the store, or restore it).
+`signed_commits` ("off" or "require") decides whether every commit must
+carry a trusted signature, which is what catches an edit that was also
+committed.
 
 A preset is a starting point: any individual toggle can be overridden in
 the policy file or by the scenario.
@@ -37,6 +40,7 @@ PRESETS: dict[str, dict] = {
         "observer_can_read_agent_memory": True,
         "human_corrections": True,
         "outside_edits": "report",
+        "signed_commits": "off",
     },
     "default": {
         "capture_lanes": ["self", "observed"],
@@ -46,6 +50,7 @@ PRESETS: dict[str, dict] = {
         "observer_can_read_agent_memory": True,
         "human_corrections": True,
         "outside_edits": "report",
+        "signed_commits": "off",
     },
     "cross_enterprise": {
         # The counterparty runs its own agent its own way. We cannot
@@ -59,6 +64,7 @@ PRESETS: dict[str, dict] = {
         "observer_can_read_agent_memory": False,
         "human_corrections": False,
         "outside_edits": "report",
+        "signed_commits": "off",
     },
 }
 
@@ -84,6 +90,9 @@ class Policy:
     # "report" records it and lets the agent read the edited file;
     # "restore" records it and puts the file back to its last commit.
     outside_edits: str = "report"
+    # "require": every commit must carry an SSH signature from a trusted
+    # key (the store's, or the correcting person's); see gitmem.signing.
+    signed_commits: str = "off"
 
     # -- loading ------------------------------------------------------------
 
@@ -144,6 +153,9 @@ class Policy:
 
     def restores_outside_edits(self) -> bool:
         return self.outside_edits == "restore"
+
+    def requires_signatures(self) -> bool:
+        return self.signed_commits == "require"
 
     def may_read(self, reader: str, fact) -> Decision:
         """`reader` is an agent name, "harness" or "observer"."""

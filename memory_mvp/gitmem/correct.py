@@ -26,6 +26,7 @@ from typing import Any
 
 from .contract import HUMAN_PREFIX, Contract, RejectedWrite
 from .policy import Policy
+from .signing import Keyring, verify
 from .store import Store
 
 
@@ -90,7 +91,9 @@ def restore(store: Store, edits: list[dict]) -> list[dict]:
 
 def correct(store: Store, holder: str, key: str, value: Any, reason: str,
             by: str = "operator", policy: Policy | None = None,
-            contract: Contract | None = None) -> Outcome:
+            contract: Contract | None = None,
+            keyring: Keyring | None = None,
+            key_path: str | None = None) -> Outcome:
     """Correct one fact in `holder`'s own memory, on the record.
 
     Refused, with the reason, when the policy does not allow corrections,
@@ -114,6 +117,32 @@ def correct(store: Store, holder: str, key: str, value: Any, reason: str,
             + "); resolve those first, or this correction would commit them"
             " as if they were on the record",
             "outside_edits_pending", details={"edits": pending})
+
+    signer = None
+    if policy.requires_signatures():
+        keyring = keyring or Keyring()
+        principal = f"{HUMAN_PREFIX}{by}"
+        signer = keyring.signer(principal, key_path)
+        if signer is None:
+            return Outcome(
+                False,
+                f"this deployment requires signed commits, and {principal}"
+                " has no trusted key on this machine; an administrator adds"
+                f" one with `gitmem.inspect keygen {principal}` or"
+                f" `gitmem.inspect trust {principal} <key.pub>`",
+                "signed_commits")
+        checked_history = verify(store, keyring)
+        if checked_history["bad"] or checked_history["rewritten"]:
+            bad = checked_history["bad"]
+            return Outcome(
+                False,
+                f"the store has {len(bad)} commit(s) no trusted key signed"
+                + (" and its history was rewritten"
+                   if checked_history["rewritten"] else "")
+                + "; resolve those first, or this correction would sit on"
+                " top of changes nobody is accountable for",
+                "untrusted_commits_pending",
+                details={"commits": [c.commit for c in bad]})
 
     holders = {f.holder for f in store.all()}
     if holder not in holders:
@@ -142,7 +171,7 @@ def correct(store: Store, holder: str, key: str, value: Any, reason: str,
                        fact=changes[0].fact.id)
     commit = store.commit(changes, source=source,
                           title=f"correction by {asserter}: {holder} {key}",
-                          when="0")
+                          when="0", signer=signer)
     change = changes[0]
     return Outcome(True, reason, "human_corrections", commit=commit,
                    fact=change.fact.id,

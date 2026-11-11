@@ -189,7 +189,8 @@ def _finish(stages, trace, names, opened, rejected, writes=None):
             "the contract refused nothing in this run"))
 
     tampered = trace.find("memory_tampered")
-    restored = trace.find("memory_restored")
+    restored = [e for e in trace.find("memory_restored")
+                if e.detail.get("source", "working_tree") == "working_tree"]
     if tampered and restored:
         # The store was not clean, so that stage cannot pass; what can be
         # judged is whether the policy's answer to it was carried out
@@ -220,6 +221,48 @@ def _finish(stages, trace, names, opened, rejected, writes=None):
             "store_was_clean_at_open", True,
             [e.event_id for e in trace.find("memory_store_opened")],
             "the store must be able to say whether it was edited"))
+
+    # -- signed commits: an edit that was also committed --------------------
+
+    signed = trace.find("memory_signatures_checked")
+    untrusted = trace.find("memory_untrusted_commit")
+    undone = [e for e in trace.find("memory_restored")
+              if e.detail.get("source") == "commits"]
+    if not signed:
+        stages.append(_not_tested(
+            "commits_signed",
+            "signed_commits is off in this deployment"))
+    elif untrusted and undone:
+        first_read = min((e.event_id for e in trace.find("memory_recalled")),
+                         key=lambda i: int(i.split("-")[1]), default=None)
+        in_time = first_read is None or all(
+            int(e.event_id.split("-")[1]) < int(first_read.split("-")[1])
+            for e in undone)
+        named = {e.detail.get("commit") for e in untrusted}
+        covered = set(undone[0].detail.get("commits", []))
+        stages.append(_check(
+            "untrusted_commits_undone", in_time and named <= covered,
+            [e.event_id for e in untrusted + undone],
+            "every commit no trusted key signed must be undone before an"
+            " agent reads its memory",
+            f"{len(named)} commit(s) without a trusted signature were found"
+            " and their fact changes put back before any agent read them"))
+    elif untrusted:
+        stages.append(_check(
+            "commits_signed", False, [e.event_id for e in untrusted],
+            "every commit must carry a trusted signature from the right"
+            " signer: " + ", ".join(
+                f"{e.detail.get('commit')} {e.detail.get('status')}"
+                for e in untrusted[:4])))
+    else:
+        d = signed[-1].detail
+        stages.append(_check(
+            "commits_signed", not d.get("rewritten"),
+            [e.event_id for e in signed],
+            "the store's history was rewritten past its trust anchor",
+            f"{d.get('trusted', 0)} commit(s) signed by a trusted key"
+            + (f", {d['legacy']} legacy from before signing was turned on"
+               if d.get("legacy") else "")))
 
     # -- corrections: a person changing memory on the record -----------------
 

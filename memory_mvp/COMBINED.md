@@ -137,6 +137,7 @@ preset, so switching preset really switches behaviour.
 | `observer_can_read_agent_memory` | can the observer compare its record against the agent's |
 | `human_corrections` | can a named person correct an agent's memory through the store (off in `cross_enterprise`) |
 | `outside_edits` | a fact file edited around the store: `report` it and let the agent read it (default), or `restore` it before any agent reads |
+| `signed_commits` | `off` (default) or `require`: every commit must carry an SSH signature from a trusted key, the right one for what it claims |
 
 | Preset | Shape |
 |---|---|
@@ -183,6 +184,56 @@ Only the working-tree column of `git status` counts as an outside edit. A
 change the store staged but never committed (a write cut off between
 `git add` and `git commit`) is the store's own, not somebody else's.
 
+## Signed commits — catching an edit that was also committed
+
+`outside_edits` catches a file edited around the store, because git sees a
+change nobody committed. It cannot catch someone who edits the file *and
+runs `git commit`*: the working tree is clean, and the commit looks like
+any other. With `signed_commits: "require"`, every commit must carry an
+SSH signature from a trusted key:
+
+| Commit | Must be signed by |
+|---|---|
+| anything the store writes (agents, observer, reports, restores) | `gitmem-store`, the store's own key |
+| `correction by human:alex` | `human:alex`, and only that key |
+
+Keys live **outside the memory folder**, in `TOWN_GITMEM_KEYS` (default
+`~/.config/gitmem/keys`), so someone who can edit the memory files cannot
+also sign as the store. `allowed_signers` there, in git's own format, is
+the list of who may change memory at all. Each store also has a **trust
+anchor** there, the first commit made with signing on: commits before it
+are reported as legacy, and if the anchor disappears from the history,
+the history was rewritten and nothing in it is trusted.
+
+```bash
+python3 -m gitmem.inspect keygen human:alex      # make a key and trust it
+python3 -m gitmem.inspect trust human:alex ~/.ssh/id_ed25519.pub   # or trust your own
+python3 -m gitmem.inspect correct agent-a widget_unit_cents 2195 \
+    --reason "price up" --by alex [--key ~/.ssh/id_ed25519]
+python3 -m gitmem.inspect verify                 # who signed every commit
+```
+
+```
+ok c4e4e7a trusted       gitmem-store   memory: ... (agent-a remembers last_order_total_cents)
+ok 9a5aa4c trusted       human:alex     memory: ... (correction by human:alex: agent-a widget_unit_cents)
+!! ddbda8f unsigned      -              fix price
+```
+
+When a run opens the store, it checks every commit. An untrusted one
+(unsigned, signed by a key nobody trusts, or signed by the wrong person,
+such as the store's key on a "correction by human:alex") fails
+`commits_signed` under `outside_edits: report`. Under
+`outside_edits: restore`, every fact file it touched goes back to its
+latest trusted version (or is removed, if no trusted commit ever wrote
+it). That is committed with the store's key, the undo commit names the
+commits it undid, and the run passes `untrusted_commits_undone`. Later runs
+list those commits as `undone`, not pending. A correction is refused while
+any untrusted commit is pending, and refused if the person has no trusted
+key, or offers a key that is not theirs.
+
+Needs git 2.34+ and `ssh-keygen`. `test_signing.py` covers each of these,
+plus turning signing on for an existing store and a rewritten history.
+
 ## What lands in the evidence bundle
 
 Keys, commits, rules and reasons — never values. A stage
@@ -193,6 +244,8 @@ memory_store_opened      head, preset, lanes, fact count
 memory_tampered          fact files changed outside the store
 memory_restored          ...put back to their last commit (outside_edits = restore)
 memory_correction_in_effect a fact last set by a person: key, fact, who, reason length
+memory_signatures_checked trusted / legacy / untrusted commit counts, anchor
+memory_untrusted_commit  one per commit no trusted key signed: status, signer, expected
 memory_written           a self-reported fact: key, op, commit, supersedes
 memory_observed          an observed fact: + evidence length, confidence
 memory_write_rejected    the contract refused a write, and why
@@ -216,6 +269,7 @@ memory_reconcile_finding one line per disagreement
 | 2 | `one_contract_for_both_lanes` · `refusals_explain_themselves` |
 | 3 | `every_change_committed` · `changes_carry_provenance` · `history_is_queryable` · `store_was_clean_at_open` (or `outside_edits_restored` when the policy restores) |
 | corrections | `corrections_on_record` · `agent_acted_on_correction` |
+| signatures | `commits_signed` (or `untrusted_commits_undone` when the policy restores) |
 | 4 | `reads_are_policy_decisions` · `agents_kept_out_of_each_others_memory` |
 | — | `values_stayed_out_of_the_trace` |
 
@@ -232,6 +286,7 @@ that forbids comparing the lanes.
 | `TOWN_MEMORY_SCHEMA` | `memory_mvp/memory_schema.json` | the write contract |
 | `TOWN_MEMORY_POLICY` | `memory_mvp/memory_policy.json` | the policy file |
 | `TOWN_MEMORY_PRESET` | from the file | override the preset for one run |
+| `TOWN_GITMEM_KEYS` | `~/.config/gitmem/keys` | signing keys, trusted signers and trust anchors |
 | `TOWN_OBSERVER_MODEL` | `rules:v1` | which observer runs |
 | `TOWN_LLM_MODEL` | `mock:v1` | which brain drives the agents |
 
@@ -243,11 +298,14 @@ that forbids comparing the lanes.
 * Reconciliation compares by key. Two lanes that record the same fact
   under different key names read as one omission plus one unsupported —
   the key-drift problem, now visible instead of silent.
-* A person who edits a fact file *and commits it with git* is not caught
-  by the store: the history would show the commit, but nothing marks it as
-  not the store's own. Signed commits would close that.
-* Writes are not signed. Provenance says who *claims* to have asserted a
-  fact; until each agent signs with its identity key, that claim is only
-  as good as the process that wrote it.
+* With `signed_commits` off (the default), a person who edits a fact file
+  *and commits it with git* is not caught. Turn it on to close that.
+* Signatures are as strong as the keys folder. Someone who can read the
+  store's private key can sign as the store; keep `TOWN_GITMEM_KEYS` where
+  the people who edit memory files cannot reach it, or use a key held by an
+  agent or hardware token.
+* Agents do not sign individually. The store signs on their behalf, so a
+  signature says the store made the change, not which agent asked for it;
+  provenance inside the commit still names the asserter.
 * A model observer costs a call per turn. The CLI backend is free of API
   credits but slow under load — minutes per run, not seconds.

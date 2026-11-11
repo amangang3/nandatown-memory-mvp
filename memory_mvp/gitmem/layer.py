@@ -29,6 +29,7 @@ from nandatown.layers import register
 from .brains import ObserverError
 from .contract import HUMAN_PREFIX, Contract, RejectedWrite
 from .correct import corrections_in_effect, outside_edits, restore
+from .signing import Keyring, start as start_signing, undo_untrusted, verify
 from .observer import make_reader, reconcile, turns_from
 from .policy import Policy
 from .store import Store
@@ -50,10 +51,17 @@ class GitMemory:
         self.engine = engine
         self.policy = Policy.load()
         self.contract = Contract()
-        self.store = Store(STORE_DIR)
+        self.keyring = None
+        signer = None
+        if self.policy.requires_signatures():
+            self.keyring = Keyring()
+            signer = self.keyring.store_signer()
+        self.store = Store(STORE_DIR, signer=signer)
         if RESET and os.path.isdir(STORE_DIR):
             shutil.rmtree(STORE_DIR)
         self.store.init()
+        if self.keyring is not None:
+            start_signing(self.store, self.keyring)
         self.reader = None
         self.last_report: dict = {}
 
@@ -203,6 +211,7 @@ class GitMemory:
                    {"head": self.store.head(), "preset": self.policy.preset,
                     "lanes": list(self.policy.capture_lanes),
                     "outside_edits": self.policy.outside_edits,
+                    "signed_commits": self.policy.signed_commits,
                     "human_corrections": self.policy.human_corrections,
                     "facts": len(self.store.active()),
                     "store": os.path.relpath(STORE_DIR, HERE)})
@@ -219,9 +228,12 @@ class GitMemory:
                             "count": len(done),
                             "actions": [d["action"] for d in done][:8],
                             "rule": "outside_edits",
+                            "source": "working_tree",
                             "reason": "nobody is on record for these"
                                       " changes, so the last committed"
                                       " version stands"})
+        if self.keyring is not None:
+            self._check_signatures()
         # Corrections a person made through the store since it was written
         # by the agent. Keys, facts and who: never the values.
         for fact in corrections_in_effect(self.store):
@@ -230,6 +242,35 @@ class GitMemory:
                         "asserter": fact.asserter,
                         "replaced": fact.supersedes,
                         "reason_chars": len(fact.evidence)})
+
+    def _check_signatures(self) -> None:
+        """Every commit must carry a trusted signature, from the right
+        signer for what it claims to be."""
+        report = verify(self.store, self.keyring)
+        commits = report["commits"]
+        self._emit("town", "memory_signatures_checked", self.engine.run_id, {
+            "commits": len(commits),
+            "trusted": sum(c.status == "trusted" for c in commits),
+            "legacy": sum(c.status == "legacy" for c in commits),
+            "untrusted": len(report["bad"]),
+            "anchor": (report["anchor"] or "")[:12],
+            "rewritten": report["rewritten"]})
+        for check in report["bad"]:
+            self._emit("town", "memory_untrusted_commit", self.engine.run_id,
+                       {"commit": check.commit, "status": check.status,
+                        "signer": check.signer, "expected": check.expected,
+                        "rule": "signed_commits"})
+        if report["bad"] and self.policy.restores_outside_edits():
+            done = undo_untrusted(self.store, self.keyring, report)
+            self._emit("town", "memory_restored", self.engine.run_id,
+                       {"files": [d["path"] for d in done][:8],
+                        "count": len(done),
+                        "actions": [d["action"] for d in done][:8],
+                        "commits": [c.commit for c in report["bad"]][:8],
+                        "rule": "signed_commits",
+                        "source": "commits",
+                        "reason": "no trusted key signed these commits, so"
+                                  " the last trusted version stands"})
 
     def _close(self) -> None:
         # The harness exercises its own read right before anything else,

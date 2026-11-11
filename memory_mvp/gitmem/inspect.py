@@ -8,8 +8,13 @@
     python3 -m gitmem.inspect try <agent> <key> <value> [--lane observed]
                                              # would the contract accept it?
     python3 -m gitmem.inspect correct <agent> <key> <value> --reason "why"
-                                  [--by NAME] # change a fact on the record
+                      [--by NAME] [--key PATH] # change a fact on the record
     python3 -m gitmem.inspect restore        # put outside edits back
+    python3 -m gitmem.inspect keygen <human:NAME|gitmem-store>
+                                             # make a signing key and trust it
+    python3 -m gitmem.inspect trust <human:NAME> <key.pub>
+                                             # trust an existing SSH key
+    python3 -m gitmem.inspect verify         # who signed every commit
     python3 -m gitmem.inspect events [run-id] # the memory trail of a run
 
 Run it from the memory_mvp folder, or point TOWN_GITMEM_DIR somewhere else.
@@ -24,6 +29,7 @@ import sys
 from .contract import Contract, RejectedWrite
 from .correct import correct as _correct
 from .correct import outside_edits, restore as _restore
+from .signing import Keyring, verify as _verify
 from .policy import Policy
 from .store import Store
 
@@ -100,9 +106,15 @@ def policy(_args: list[str]) -> None:
 def check(_args: list[str]) -> None:
     store = _store()
     edits = outside_edits(store)
+    unsigned = _signature_problems(store)
+    if unsigned:
+        print(f"UNTRUSTED · {len(unsigned)} commit(s) without a trusted"
+              " signature; see `verify`")
     if not edits:
         print(f"clean · HEAD {store.head()} · "
               f"{len(store.active())} active fact(s)")
+        if unsigned:
+            raise SystemExit(1)
         return
     print(f"TAMPERED · {len(edits)} fact file(s) changed outside the store:")
     for edit in edits:
@@ -112,6 +124,13 @@ def check(_args: list[str]) -> None:
     print("Put them back with `restore`, or make the change on the record"
           " with `correct` after restoring.")
     raise SystemExit(1)
+
+
+def _signature_problems(store) -> list:
+    if not Policy.load().requires_signatures():
+        return []
+    report = _verify(store, Keyring())
+    return report["bad"] + (["rewritten"] if report["rewritten"] else [])
 
 
 def _option(args: list[str], name: str) -> tuple[str | None, list[str]]:
@@ -128,6 +147,7 @@ def correct(args: list[str]) -> None:
     """A person changing one fact in an agent's memory, on the record."""
     reason, args = _option(args, "--reason")
     by, args = _option(args, "--by")
+    key_path, args = _option(args, "--key")
     if len(args) < 3:
         print('usage: correct <agent> <key> <value> --reason "why"'
               " [--by NAME]")
@@ -135,7 +155,7 @@ def correct(args: list[str]) -> None:
     holder, key, value = args[0], args[1], " ".join(args[2:])
     store = _store()
     outcome = _correct(store, holder, key, value, reason or "",
-                       by=by or "operator")
+                       by=by or "operator", key_path=key_path)
     if not outcome.accepted:
         print(f"REFUSED [{outcome.rule}]")
         print(f"  {outcome.reason}")
@@ -151,6 +171,54 @@ def correct(args: list[str]) -> None:
           + (f" replaces {outcome.replaced}" if outcome.replaced else "")
           + f" · by {fact.asserter} · why: {outcome.reason}")
     print(f"  {holder} will act on this the next time it reads {key}.")
+
+
+def keygen(args: list[str]) -> None:
+    if len(args) != 1:
+        print("usage: keygen <human:NAME|gitmem-store>")
+        raise SystemExit(2)
+    ring = Keyring()
+    try:
+        signer = ring.keygen(args[0])
+    except ValueError as why:
+        print(f"REFUSED · {why}")
+        raise SystemExit(2)
+    print(f"trusted {signer.principal} · key {signer.key}")
+    print(f"  allowed signers: {ring.allowed}")
+
+
+def trust(args: list[str]) -> None:
+    if len(args) != 2:
+        print("usage: trust <human:NAME> <public-key-file>")
+        raise SystemExit(2)
+    try:
+        Keyring().trust(args[0], args[1])
+    except (ValueError, FileNotFoundError) as why:
+        print(f"REFUSED · {why}")
+        raise SystemExit(2)
+    print(f"trusted {args[0]} · {args[1]}")
+
+
+def verify(_args: list[str]) -> None:
+    store = _store()
+    ring = Keyring()
+    report = _verify(store, ring)
+    print(f"anchor {(report['anchor'] or 'none')[:12]}"
+          f" · trusted signers: {', '.join(sorted(ring.principals())) or 'none'}"
+          f" · keys: {ring.root}")
+    if report["rewritten"]:
+        print("HISTORY REWRITTEN · the trust anchor is no longer in it;"
+              " nothing here is trusted")
+    for check in report["commits"]:
+        mark = {"trusted": "ok", "legacy": "--", "undone": "~~"}.get(
+            check.status, "!!")
+        who = check.signer or "-"
+        extra = (f"  (expected {check.expected})"
+                 if check.status == "wrong_signer" else "")
+        print(f"{mark} {check.commit[:7]} {check.status:<13} {who:<14}"
+              f" {check.subject[:70]}{extra}")
+    if report["bad"] or report["rewritten"]:
+        raise SystemExit(1)
 
 
 def restore(_args: list[str]) -> None:
@@ -247,7 +315,8 @@ def events(args: list[str]) -> None:
 
 COMMANDS = {"facts": facts, "history": history, "log": log,
             "policy": policy, "check": check, "try": try_write,
-            "events": events, "correct": correct, "restore": restore}
+            "events": events, "correct": correct, "restore": restore,
+            "keygen": keygen, "trust": trust, "verify": verify}
 
 
 def main(argv: list[str]) -> None:
