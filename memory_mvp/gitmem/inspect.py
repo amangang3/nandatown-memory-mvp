@@ -7,6 +7,9 @@
     python3 -m gitmem.inspect check          # any fact edited outside the store?
     python3 -m gitmem.inspect try <agent> <key> <value> [--lane observed]
                                              # would the contract accept it?
+    python3 -m gitmem.inspect correct <agent> <key> <value> --reason "why"
+                                  [--by NAME] # change a fact on the record
+    python3 -m gitmem.inspect restore        # put outside edits back
     python3 -m gitmem.inspect events [run-id] # the memory trail of a run
 
 Run it from the memory_mvp folder, or point TOWN_GITMEM_DIR somewhere else.
@@ -19,6 +22,8 @@ import os
 import sys
 
 from .contract import Contract, RejectedWrite
+from .correct import correct as _correct
+from .correct import outside_edits, restore as _restore
 from .policy import Policy
 from .store import Store
 
@@ -94,17 +99,69 @@ def policy(_args: list[str]) -> None:
 
 def check(_args: list[str]) -> None:
     store = _store()
-    dirty = store.dirty()
-    if not dirty:
+    edits = outside_edits(store)
+    if not edits:
         print(f"clean · HEAD {store.head()} · "
               f"{len(store.active())} active fact(s)")
         return
-    print(f"TAMPERED · {len(dirty)} fact file(s) changed outside the store:")
-    for path in dirty:
-        print(f"  {path}")
+    print(f"TAMPERED · {len(edits)} fact file(s) changed outside the store:")
+    for edit in edits:
+        print(f"  {edit['change']:<9} {edit['path']}")
     print()
     print(store.diff())
+    print("Put them back with `restore`, or make the change on the record"
+          " with `correct` after restoring.")
     raise SystemExit(1)
+
+
+def _option(args: list[str], name: str) -> tuple[str | None, list[str]]:
+    if name not in args:
+        return None, args
+    at = args.index(name)
+    if at + 1 >= len(args):
+        print(f"{name} needs a value")
+        raise SystemExit(2)
+    return args[at + 1], args[:at] + args[at + 2:]
+
+
+def correct(args: list[str]) -> None:
+    """A person changing one fact in an agent's memory, on the record."""
+    reason, args = _option(args, "--reason")
+    by, args = _option(args, "--by")
+    if len(args) < 3:
+        print('usage: correct <agent> <key> <value> --reason "why"'
+              " [--by NAME]")
+        raise SystemExit(2)
+    holder, key, value = args[0], args[1], " ".join(args[2:])
+    store = _store()
+    outcome = _correct(store, holder, key, value, reason or "",
+                       by=by or "operator")
+    if not outcome.accepted:
+        print(f"REFUSED [{outcome.rule}]")
+        print(f"  {outcome.reason}")
+        if "rule_for_key" in outcome.details:
+            print(f"  rule for this key:"
+                  f" {json.dumps(outcome.details['rule_for_key'])}")
+        raise SystemExit(1)
+    fact = store.get(outcome.fact)
+    print(f"CORRECTED · commit {outcome.commit}")
+    print(f"  {holder} {key}: {json.dumps(outcome.old_value)}"
+          f" -> {json.dumps(fact.value)}")
+    print(f"  {outcome.fact}"
+          + (f" replaces {outcome.replaced}" if outcome.replaced else "")
+          + f" · by {fact.asserter} · why: {outcome.reason}")
+    print(f"  {holder} will act on this the next time it reads {key}.")
+
+
+def restore(_args: list[str]) -> None:
+    store = _store()
+    edits = outside_edits(store)
+    if not edits:
+        print("clean · nothing to restore")
+        return
+    for done in _restore(store, edits):
+        where = f" -> {done['moved_to']}" if "moved_to" in done else ""
+        print(f"{done['action']:<11} {done['path']}{where}")
 
 
 def try_write(args: list[str]) -> None:
@@ -146,7 +203,8 @@ def try_write(args: list[str]) -> None:
           f"  scope={checked['scope']}")
 
 
-FIELDS_SHOWN = ("key", "lane", "op", "commit", "hit", "rule", "reader",
+FIELDS_SHOWN = ("key", "lane", "op", "commit", "hit", "asserter",
+                "corrected", "fact", "count", "actions", "rule", "reader",
                 "holder", "kind", "accepted", "unchanged", "rejected",
                 "agreed", "omission", "contradiction", "unsupported",
                 "preset", "lanes", "files", "model", "reason")
@@ -189,7 +247,7 @@ def events(args: list[str]) -> None:
 
 COMMANDS = {"facts": facts, "history": history, "log": log,
             "policy": policy, "check": check, "try": try_write,
-            "events": events}
+            "events": events, "correct": correct, "restore": restore}
 
 
 def main(argv: list[str]) -> None:

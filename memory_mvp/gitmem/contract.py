@@ -6,6 +6,8 @@ with two differences that follow from where the fact came from:
 
   * a `self` write must be made by the holder itself — an agent cannot
     write into another agent's memory;
+  * a `self` write may also come from a named person (`human:<name>`)
+    correcting the agent's memory, and then it must say why;
   * an `observed` write must carry evidence (a quote from the trace) and
     name the event it came from, because an observation nobody can check
     is just an opinion with better handwriting.
@@ -26,6 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_SCHEMA = os.path.join(os.path.dirname(HERE), "memory_schema.json")
 KEY_SHAPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,59}$")
 LANES = ("self", "observed")
+HUMAN_PREFIX = "human:"   # a person correcting an agent's memory
 
 
 class RejectedWrite(ValueError):
@@ -79,9 +82,20 @@ class Contract:
 
         asserter = str(op.get("asserter") or holder)
         if lane == "self" and asserter != holder:
-            raise RejectedWrite(
-                f"{asserter!r} cannot write into {holder!r}'s own memory;"
-                f" a self-reported fact is written by its holder or not at all")
+            if not asserter.startswith(HUMAN_PREFIX):
+                raise RejectedWrite(
+                    f"{asserter!r} cannot write into {holder!r}'s own memory;"
+                    f" a self-reported fact is written by its holder, or"
+                    f" corrected by a named person, or not at all")
+            if not KEY_SHAPE.match(asserter[len(HUMAN_PREFIX):]):
+                raise RejectedWrite(
+                    f"a correction must name the person making it, as"
+                    f" {HUMAN_PREFIX}<name>; got {asserter!r}")
+            if not str(op.get("reason", "")).strip():
+                raise RejectedWrite(
+                    "a correction must say why it was made; an unexplained"
+                    " change to an agent's memory is indistinguishable from"
+                    " tampering")
         if lane == "observed":
             if asserter in agents:
                 raise RejectedWrite(

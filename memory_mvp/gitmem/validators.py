@@ -189,7 +189,27 @@ def _finish(stages, trace, names, opened, rejected, writes=None):
             "the contract refused nothing in this run"))
 
     tampered = trace.find("memory_tampered")
-    if tampered:
+    restored = trace.find("memory_restored")
+    if tampered and restored:
+        # The store was not clean, so that stage cannot pass; what can be
+        # judged is whether the policy's answer to it was carried out
+        # before any agent read its memory.
+        first_read = min((e.event_id for e in trace.find("memory_recalled")),
+                         key=lambda i: int(i.split("-")[1]), default=None)
+        in_time = first_read is None or all(
+            int(e.event_id.split("-")[1]) < int(first_read.split("-")[1])
+            for e in restored)
+        stages.append(_check(
+            "outside_edits_restored",
+            in_time and restored[0].detail.get("count", 0)
+            >= tampered[0].detail.get("count", 0),
+            [e.event_id for e in tampered + restored],
+            "every file edited outside the store must be put back before"
+            " an agent reads its memory",
+            f"{restored[0].detail.get('count', 0)} file(s) edited outside"
+            " the store were put back to their last commit before any"
+            " agent read them"))
+    elif tampered:
         stages.append(_check(
             "store_was_clean_at_open", False,
             [e.event_id for e in tampered],
@@ -200,6 +220,42 @@ def _finish(stages, trace, names, opened, rejected, writes=None):
             "store_was_clean_at_open", True,
             [e.event_id for e in trace.find("memory_store_opened")],
             "the store must be able to say whether it was edited"))
+
+    # -- corrections: a person changing memory on the record -----------------
+
+    corrections = trace.find("memory_correction_in_effect")
+    if not corrections:
+        stages.append(_not_tested(
+            "corrections_on_record",
+            "no fact in this store was set by a person"))
+        stages.append(_not_tested(
+            "agent_acted_on_correction",
+            "no fact in this store was set by a person"))
+    else:
+        stages.append(_check(
+            "corrections_on_record",
+            all(str(e.detail.get("asserter", "")).startswith("human:")
+                and e.detail.get("reason_chars", 0) > 0
+                for e in corrections),
+            [e.event_id for e in corrections],
+            "a fact a person changed must name that person and carry the"
+            " reason they gave"))
+        corrected = {e.detail.get("fact") for e in corrections}
+        used = [e for e in trace.find("memory_recalled")
+                if e.detail.get("fact") in corrected
+                and e.detail.get("corrected")]
+        if used:
+            stages.append(_check(
+                "agent_acted_on_correction", True,
+                [e.event_id for e in used], "",
+                "an agent read a fact a person corrected, and the read"
+                " names who set it: "
+                + ", ".join(sorted({f"{e.subject} {e.detail.get('key')}"
+                                    for e in used}))))
+        else:
+            stages.append(_not_tested(
+                "agent_acted_on_correction",
+                "no agent read a corrected fact in this run"))
 
     # -- capability 4: access control ----------------------------------------
 

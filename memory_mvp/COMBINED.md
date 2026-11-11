@@ -135,6 +135,8 @@ preset, so switching preset really switches behaviour.
 | `subject_can_read_claims_about_self` | can the agent a claim is *about* read it |
 | `harness_can_read_agent_memory` | can the operator look inside |
 | `observer_can_read_agent_memory` | can the observer compare its record against the agent's |
+| `human_corrections` | can a named person correct an agent's memory through the store (off in `cross_enterprise`) |
+| `outside_edits` | a fact file edited around the store: `report` it and let the agent read it (default), or `restore` it before any agent reads |
 
 | Preset | Shape |
 |---|---|
@@ -153,6 +155,34 @@ Every read by anyone other than the holder emits
 decided it. The harness exercises its own read right at the end of every
 run, so a bundle always shows what the operator was allowed to see.
 
+## Corrections — changing memory from outside the agent
+
+A person can change what an agent remembers in two ways, and the layer
+treats them differently:
+
+| | Correction (`gitmem.inspect correct`) | Outside edit (a text editor) |
+|---|---|---|
+| Path | through the store and the write contract | around the store |
+| On record | `asserter: human:<name>`, the reason, a commit | nobody; git only sees a file that differs from its last commit |
+| The agent | reads it as its own memory, and the recall names who set it | reads it under `report`; never sees it under `restore` |
+| Refused when | no reason, a value the contract rejects, an unknown holder, `human_corrections` off, or an outside edit still pending | — |
+
+```bash
+python3 -m gitmem.inspect correct agent-a widget_unit_cents 2195 \
+    --reason "agent-b raised its price" --by your-name
+python3 -m gitmem.inspect restore      # put outside edits back
+```
+
+A correction is refused while any outside edit is pending, because
+committing on top of one would put the edited file on the record as if
+the store had made it. The library function is `gitmem.correct.correct()`;
+`test_corrections.py` drives the whole story through real runs: learn,
+go stale, correct, act on it, hand-edit, report, restore.
+
+Only the working-tree column of `git status` counts as an outside edit. A
+change the store staged but never committed (a write cut off between
+`git add` and `git commit`) is the store's own, not somebody else's.
+
 ## What lands in the evidence bundle
 
 Keys, commits, rules and reasons — never values. A stage
@@ -161,11 +191,13 @@ Keys, commits, rules and reasons — never values. A stage
 ```
 memory_store_opened      head, preset, lanes, fact count
 memory_tampered          fact files changed outside the store
+memory_restored          ...put back to their last commit (outside_edits = restore)
+memory_correction_in_effect a fact last set by a person: key, fact, who, reason length
 memory_written           a self-reported fact: key, op, commit, supersedes
 memory_observed          an observed fact: + evidence length, confidence
 memory_write_rejected    the contract refused a write, and why
 memory_write_blocked     the policy does not capture that lane, and why
-memory_recalled          a holder read its own memory, hit or miss
+memory_recalled          a holder read its own memory, hit or miss, and who last set it
 memory_access_allowed    a read by someone else, and the rule that allowed it
 memory_access_denied     ...and the rule that refused it
 memory_observation_done  which observer ran, accepted/rejected counts
@@ -182,7 +214,8 @@ memory_reconcile_finding one line per disagreement
 |---|---|
 | 1 | `lane_self_captured` · `lane_observed_captured` · `observed_facts_carry_evidence` · `lanes_compared` · `observer_found_a_gap` |
 | 2 | `one_contract_for_both_lanes` · `refusals_explain_themselves` |
-| 3 | `every_change_committed` · `changes_carry_provenance` · `history_is_queryable` · `store_was_clean_at_open` |
+| 3 | `every_change_committed` · `changes_carry_provenance` · `history_is_queryable` · `store_was_clean_at_open` (or `outside_edits_restored` when the policy restores) |
+| corrections | `corrections_on_record` · `agent_acted_on_correction` |
 | 4 | `reads_are_policy_decisions` · `agents_kept_out_of_each_others_memory` |
 | — | `values_stayed_out_of_the_trace` |
 
@@ -210,6 +243,9 @@ that forbids comparing the lanes.
 * Reconciliation compares by key. Two lanes that record the same fact
   under different key names read as one omission plus one unsupported —
   the key-drift problem, now visible instead of silent.
+* A person who edits a fact file *and commits it with git* is not caught
+  by the store: the history would show the commit, but nothing marks it as
+  not the store's own. Signed commits would close that.
 * Writes are not signed. Provenance says who *claims* to have asserted a
   fact; until each agent signs with its identity key, that claim is only
   as good as the process that wrote it.

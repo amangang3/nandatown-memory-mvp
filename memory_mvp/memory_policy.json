@@ -6,5 +6,9 @@
     "cross_enterprise": "we do not define how the other side records memory and cannot read inside it; the observed lane is the only capture"
   },
   "preset": "default",
-  "overrides": {}
+  "overrides": {},
+  "_toggles": {
+    "human_corrections": "may a named person correct an agent's memory through the store (python3 -m gitmem.inspect correct)",
+    "outside_edits": "a fact file edited around the store: 'report' it and let the agent read it, or 'restore' it to its last commit before any agent reads"
+  }
 }

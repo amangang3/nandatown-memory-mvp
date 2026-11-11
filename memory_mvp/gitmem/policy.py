@@ -11,6 +11,10 @@ toggles exist because the right answer changes with the deployment:
                     own memory, and we do not get to read it. Only the
                     observed lane is captured, from traces we can see.
 
+Two toggles cover changes to memory that do not come from the agent:
+`human_corrections` (may a named person correct a fact through the store)
+and `outside_edits` (report a file edited around the store, or restore it).
+
 A preset is a starting point: any individual toggle can be overridden in
 the policy file or by the scenario.
 """
@@ -31,6 +35,8 @@ PRESETS: dict[str, dict] = {
         "subject_can_read_claims_about_self": True,
         "harness_can_read_agent_memory": True,
         "observer_can_read_agent_memory": True,
+        "human_corrections": True,
+        "outside_edits": "report",
     },
     "default": {
         "capture_lanes": ["self", "observed"],
@@ -38,6 +44,8 @@ PRESETS: dict[str, dict] = {
         "subject_can_read_claims_about_self": False,
         "harness_can_read_agent_memory": True,
         "observer_can_read_agent_memory": True,
+        "human_corrections": True,
+        "outside_edits": "report",
     },
     "cross_enterprise": {
         # The counterparty runs its own agent its own way. We cannot
@@ -49,6 +57,8 @@ PRESETS: dict[str, dict] = {
         "subject_can_read_claims_about_self": False,
         "harness_can_read_agent_memory": False,
         "observer_can_read_agent_memory": False,
+        "human_corrections": False,
+        "outside_edits": "report",
     },
 }
 
@@ -68,6 +78,12 @@ class Policy:
     subject_can_read_claims_about_self: bool = False
     harness_can_read_agent_memory: bool = True
     observer_can_read_agent_memory: bool = True
+    # May a named person correct an agent's memory through the store?
+    human_corrections: bool = True
+    # A fact file changed outside the store, found when a run opens it:
+    # "report" records it and lets the agent read the edited file;
+    # "restore" records it and puts the file back to its last commit.
+    outside_edits: str = "report"
 
     # -- loading ------------------------------------------------------------
 
@@ -115,6 +131,19 @@ class Policy:
             + (": we do not get to define how these agents record their own"
                " memory, so only observed facts are accepted"
                if lane == "self" else ""))
+
+    def may_correct(self) -> Decision:
+        if self.human_corrections:
+            return Decision(True, "human_corrections")
+        return Decision(
+            False, "human_corrections",
+            "this deployment does not let a person correct an agent's"
+            " memory" + (": we do not get to write inside the other side's"
+                         " agent" if self.preset == "cross_enterprise"
+                         else ""))
+
+    def restores_outside_edits(self) -> bool:
+        return self.outside_edits == "restore"
 
     def may_read(self, reader: str, fact) -> Decision:
         """`reader` is an agent name, "harness" or "observer"."""

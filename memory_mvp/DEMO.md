@@ -321,8 +321,106 @@ python3 -m gitmem.inspect events | grep -E "tampered|reconcile_finding"
 Put it back when you are done:
 
 ```bash
-git -C memory-git checkout -- facts
+python3 -m gitmem.inspect restore      # or: git -C memory-git checkout -- facts
 ```
+
+## Act 7b — Correct a memory on the record
+
+Act 7 changed the agent's memory *around* the store, and nobody is on record
+for it. Sometimes a person *should* change what an agent remembers: the
+seller has raised its price, the buyer's memory is stale, and the buyer
+will not fix it itself. That change goes *through* the store.
+
+Start from a stale buyer. Run the price change and watch the order fail:
+
+```bash
+nandatown run memory_mvp/memory_combined_price_change.yaml
+python3 -m gitmem.inspect events | grep -E "question_skipped|order_refused"
+```
+
+The buyer ordered from memory at 1995 and was refused. Now correct it. A
+correction has to say why, and has to pass the same write contract as
+anything else:
+
+```bash
+python3 -m gitmem.inspect correct agent-a widget_unit_cents 2195
+python3 -m gitmem.inspect correct agent-a widget_unit_cents cheap --reason "x"
+python3 -m gitmem.inspect correct agent-a widget_unit_cents 2195 \
+    --reason "agent-b raised its price to 2195" --by your-name
+```
+
+```
+REFUSED [write_contract]
+  a correction must say why it was made; an unexplained change to an agent's
+  memory is indistinguishable from tampering
+REFUSED [write_contract]
+  key 'widget_unit_cents' holds integers; got 'cheap'. ...
+CORRECTED · commit 5d34a93
+  agent-a widget_unit_cents: 1995 -> 2195
+  f-0015 replaces f-0004 · by human:your-name · why: agent-b raised its price to 2195
+  agent-a will act on this the next time it reads widget_unit_cents.
+```
+
+The history keeps the old value, the agent's version and the person's,
+side by side:
+
+```bash
+python3 -m gitmem.inspect history agent-a widget_unit_cents
+```
+
+```
+was   f-0004  lane=self      t=0.70   by agent-a   = 1995
+      replaced by f-0015 at t=between-runs
+now   f-0014  lane=observed  t=0.60   by observer  = 2195
+now   f-0015  lane=self      t=between-runs by human:your-name = 2195
+      evidence: correction: agent-b raised its price to 2195
+```
+
+Run it again. **The agent acts on the correction**, and the trace says the
+value it acted on came from a person:
+
+```bash
+nandatown run memory_mvp/memory_combined_price_change.yaml
+python3 -m gitmem.inspect events | grep -E "correction|widget_unit_cents"
+```
+
+```
+ ev-5  town     memory_correction_in_effect agent-a key="widget_unit_cents" asserter="human:your-name" fact="f-0015"
+ev-14  agent-a  memory_recalled          agent-a  key="widget_unit_cents" hit=true asserter="human:your-name" corrected=true fact="f-0015"
+```
+
+The order is confirmed this time, and two stages say why:
+`corrections_on_record` (the change names a person and carries a reason)
+and `agent_acted_on_correction` (an agent read it).
+
+**Same value, two paths.** Now hand-edit that corrected fact back to 1995,
+as in Act 7:
+
+```bash
+python3 -m gitmem.inspect check            # TAMPERED · modified .../f-0015.md
+python3 -m gitmem.inspect correct agent-a widget_unit_cents 2195 --reason "x"
+```
+
+```
+REFUSED [outside_edits_pending]
+  the store has 1 fact file(s) edited outside it (modified facts/agent-a/self/f-0015.md);
+  resolve those first, or this correction would commit them as if they were on the record
+```
+
+A correction is never layered over an edit nobody is on record for. Under
+the default policy the next run reports the edit, the agent believes it,
+and the order fails again. Set the policy's `outside_edits` toggle to
+`restore` and the run puts the file back to its last commit before any
+agent reads it:
+
+```bash
+echo '{"preset": "default", "overrides": {"outside_edits": "restore"}}' > /tmp/restore.json
+TOWN_MEMORY_POLICY=/tmp/restore.json nandatown run memory_mvp/memory_combined_price_change.yaml
+```
+
+`outside_edits_restored` passes, the corrected price stands, and the order
+is confirmed. Under `cross_enterprise`, corrections are refused outright:
+we do not get to write inside the other side's agent.
 
 ---
 
@@ -437,7 +535,10 @@ If you only have one slot, run these in order and talk over them:
    from the refusal*
 5. edit a fact file, then `nandatown run …` again — *caught twice: the store
    knows it was edited, and the observer contradicts it from the trace alone*
-6. `TOWN_MEMORY_PRESET=cross_enterprise nandatown run …` — *and when you do
+6. `python3 -m gitmem.inspect correct agent-a widget_unit_cents 2195 --reason "…"`
+   then `nandatown run …price_change.yaml` — *a person fixes the stale price
+   on the record, and the agent acts on it; the trace says who set it*
+7. `TOWN_MEMORY_PRESET=cross_enterprise nandatown run …` — *and when you do
    not control the other side's agents at all, observation still works*
 
 ---

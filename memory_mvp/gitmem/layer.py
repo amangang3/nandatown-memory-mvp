@@ -27,7 +27,8 @@ from typing import Any
 from nandatown.layers import register
 
 from .brains import ObserverError
-from .contract import Contract, RejectedWrite
+from .contract import HUMAN_PREFIX, Contract, RejectedWrite
+from .correct import corrections_in_effect, outside_edits, restore
 from .observer import make_reader, reconcile, turns_from
 from .policy import Policy
 from .store import Store
@@ -132,9 +133,14 @@ class GitMemory:
 
     def recall(self, agent: str, key: str) -> Any:
         fact = self.store.current(agent, key, lane="self")
-        self._emit(agent, "memory_recalled", agent,
-                   {"key": key, "hit": fact is not None, "lane": "self",
-                    "fact": fact.id if fact else None})
+        detail = {"key": key, "hit": fact is not None, "lane": "self",
+                  "fact": fact.id if fact else None}
+        if fact is not None:
+            # Who last set what the agent is about to act on: itself, or a
+            # person who corrected it.
+            detail["asserter"] = fact.asserter
+            detail["corrected"] = fact.asserter.startswith(HUMAN_PREFIX)
+        self._emit(agent, "memory_recalled", agent, detail)
         return fact.value if fact else None
 
     def keys(self, agent: str) -> list:
@@ -191,17 +197,39 @@ class GitMemory:
             self._close()
 
     def _open(self) -> None:
-        dirty = self.store.dirty()
+        edits = outside_edits(self.store)
+        dirty = [e["path"] for e in edits]
         self._emit("town", "memory_store_opened", self.engine.run_id,
                    {"head": self.store.head(), "preset": self.policy.preset,
                     "lanes": list(self.policy.capture_lanes),
+                    "outside_edits": self.policy.outside_edits,
+                    "human_corrections": self.policy.human_corrections,
                     "facts": len(self.store.active()),
                     "store": os.path.relpath(STORE_DIR, HERE)})
         if dirty:
             self._emit("town", "memory_tampered", self.engine.run_id,
                        {"files": dirty[:8], "count": len(dirty),
+                        "changes": [e["change"] for e in edits[:8]],
                         "detail": "fact files were changed outside the store"
                                   " since the last commit"})
+            if self.policy.restores_outside_edits():
+                done = restore(self.store, edits)
+                self._emit("town", "memory_restored", self.engine.run_id,
+                           {"files": [d["path"] for d in done][:8],
+                            "count": len(done),
+                            "actions": [d["action"] for d in done][:8],
+                            "rule": "outside_edits",
+                            "reason": "nobody is on record for these"
+                                      " changes, so the last committed"
+                                      " version stands"})
+        # Corrections a person made through the store since it was written
+        # by the agent. Keys, facts and who: never the values.
+        for fact in corrections_in_effect(self.store):
+            self._emit("town", "memory_correction_in_effect", fact.holder,
+                       {"key": fact.key, "fact": fact.id,
+                        "asserter": fact.asserter,
+                        "replaced": fact.supersedes,
+                        "reason_chars": len(fact.evidence)})
 
     def _close(self) -> None:
         # The harness exercises its own read right before anything else,

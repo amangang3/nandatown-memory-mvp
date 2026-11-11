@@ -50,11 +50,17 @@ closes most of the gap list in LEARNINGS.md by combining this work with
 | **Writing rules** | one typed contract in front of both lanes; an observed fact must quote the trace, and a refusal comes back with its reason |
 | **Version tracking** | every accepted change is a git commit naming who asserted it, when, from which event, and what it replaced |
 | **Access control** | every read by anyone but the holder is a recorded policy decision, with presets from `open_lab` to `cross_enterprise` |
+| **Corrections** | a person can change an agent's memory *on the record* — named, with a reason, through the same contract — and the agent acts on it; the same change made in a text editor is reported, or restored before the agent reads it |
 
 ```bash
 nandatown run memory_mvp/memory_combined.yaml       # scripted agents, ~1s
 nandatown run memory_mvp/memory_combined_llm.yaml   # model-driven agents
 cd memory_mvp && python3 -m gitmem.inspect facts agent-a --lane self
+
+# a person corrects a stale price on the record; the next run acts on it
+python3 -m gitmem.inspect correct agent-a widget_unit_cents 2195 \
+    --reason "agent-b raised its price"
+python3 -m pytest -q test_corrections.py   # the whole story, through real runs
 ```
 
 **→ [DEMO.md](memory_mvp/DEMO.md) is the walkthrough**: read an individual
@@ -72,7 +78,8 @@ memory file by hand. Nine acts, about ten minutes, no model account needed.
 | `LEARNINGS.md` | the written report |
 | `memory_mvp/DEMO.md` | **the demo walkthrough** |
 | `memory_mvp/COMBINED.md` | reference for the combined `git.v1` layer |
-| `memory_mvp/gitmem/` | the combined layer: store, contract, policy, observer, roles, stages, `inspect` CLI |
+| `memory_mvp/gitmem/` | the combined layer: store, contract, policy, observer, corrections, roles, stages, `inspect` CLI |
+| `memory_mvp/test_corrections.py` | corrections and outside edits, unit tests plus an end-to-end run sequence |
 | `memory_mvp/memory_policy.json` | access control: preset plus per-toggle overrides |
 | `memory_mvp/memory_markdown.py` | the `markdown.v1` memory layer, its write contract, the scripted agents, the validator |
 | `memory_mvp/memory_schema.json` | the write boundary: types by exact key, by pattern, and a default |
